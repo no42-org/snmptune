@@ -54,7 +54,8 @@ jobs:
       - name: Checksums and signature
         run: |
           cd dist
-          find . -type f ! -name checksums.txt | sort | xargs sha256sum > checksums.txt
+          find . -type f | sort | xargs sha256sum > "$RUNNER_TEMP/checksums.txt"
+          mv "$RUNNER_TEMP/checksums.txt" checksums.txt
           cosign sign-blob --yes --output-signature checksums.txt.sig \
             --output-certificate checksums.txt.pem checksums.txt
       - name: Attest build provenance
