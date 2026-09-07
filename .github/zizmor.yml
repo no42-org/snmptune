@@ -1,0 +1,15 @@
+# Copyright 2026 Ronny Trommer <ronny@no42.org>
+# SPDX-License-Identifier: Apache-2.0
+#
+# zizmor configuration for the workflow-lint gate.
+
+rules:
+  # zizmor prefers GitHub's "$/" self-repository syntax for reusable workflow
+  # calls. actionlint v1.7.12, the other half of this gate, rejects that
+  # syntax, and "./" remains supported by GitHub. Revisit when actionlint
+  # accepts "$/".
+  self-repository:
+    ignore:
+      - ci.yml
+      - preview.yml
+      - release.yml

@@ -34,6 +34,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false  # publishing job: no cache, no cache poisoning
       - run: make release-build VERSION=preview
       - name: Refresh the rolling preview prerelease
         env:
