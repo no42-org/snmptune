@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<datacollection-group name="MIB2">
+  <resourceType name="hrStorageIndex" label="Storage" resourceLabel="${hrStorageDescr}">
+    <persistenceSelectorStrategy class="org.opennms.netmgt.collection.support.PersistAllSelectorStrategy"/>
+    <storageStrategy class="org.opennms.netmgt.collection.support.IndexStorageStrategy"/>
+  </resourceType>
+  <group name="mib2-interfaces" ifType="all">
+    <mibObj oid=".1.3.6.1.2.1.31.1.1.1.6" instance="ifIndex" alias="ifHCInOctets" type="Counter64"/>
+    <mibObj oid=".1.3.6.1.2.1.31.1.1.1.10" instance="ifIndex" alias="ifHCOutOctets" type="Counter64"/>
+    <mibObj oid=".1.3.6.1.2.1.2.2.1.14" instance="ifIndex" alias="ifInErrors" type="counter"/>
+  </group>
+  <group name="mib2-tcp" ifType="ignore">
+    <mibObj oid=".1.3.6.1.2.1.6.5" instance="0" alias="tcpActiveOpens" type="counter"/>
+    <mibObj oid=".1.3.6.1.2.1.6.6" instance="0" alias="tcpPassiveOpens" type="counter"/>
+  </group>
+  <group name="mib2-host-resources-storage" ifType="ignore">
+    <mibObj oid=".1.3.6.1.2.1.25.2.3.1.5" instance="hrStorageIndex" alias="hrStorageSize" type="integer"/>
+  </group>
+  <systemDef name="Enterprise">
+    <sysoidMask>.1.3.6.1.4.1.</sysoidMask>
+    <collect>
+      <includeGroup>mib2-interfaces</includeGroup>
+      <includeGroup>mib2-tcp</includeGroup>
+    </collect>
+  </systemDef>
+</datacollection-group>

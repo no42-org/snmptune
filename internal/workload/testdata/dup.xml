@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<datacollection-group name="dup">
+  <group name="a" ifType="all">
+    <mibObj oid=".1.3.6.1.2.1.2.2.1.10" instance="ifIndex" alias="ifInOctets" type="counter"/>
+    <mibObj oid=".1.3.6.1.2.1.1.3" instance="0" alias="sysUpTime" type="timeticks"/>
+  </group>
+  <group name="b" ifType="all">
+    <mibObj oid=".1.3.6.1.2.1.2.2.1.10" instance="ifIndex" alias="ifInOctets" type="counter"/>
+    <mibObj oid=".1.3.6.1.2.1.1.3" instance="0" alias="sysUpTime" type="timeticks"/>
+  </group>
+</datacollection-group>

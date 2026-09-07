@@ -1,0 +1,8 @@
+/bin/
+/coverage.out
+/testdata/run/
+
+# AI tools
+_bmad-output/
+_bmad/
+openspec/
