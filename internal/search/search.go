@@ -60,6 +60,7 @@ type Outcome struct {
 	Aborted       string // set when the run stopped for the agent's sake
 	BudgetLimited string // set when a budget ended the run
 	Stressed      bool
+	Note          string // why escalation ended, for the report
 }
 
 // Peak is the error-free trial with the best throughput, or nil.
@@ -153,6 +154,7 @@ func (r *Runner) Run(ctx context.Context) Outcome {
 	for {
 		s := walk.Settings{MaxRepetitions: reps, MaxVarsPerPDU: v0}
 		if s.Product() > r.Budget.MaxProduct {
+			r.out.Note = fmt.Sprintf("escalation stopped: next step %s (%d varbinds per PDU) exceeds max-product %d", s, s.Product(), r.Budget.MaxProduct)
 			break
 		}
 		t, stop := r.trial(ctx, s, "escalate")
@@ -160,18 +162,22 @@ func (r *Runner) Run(ctx context.Context) Outcome {
 			return r.out
 		}
 		if t == nil {
+			r.out.Note = fmt.Sprintf("escalation stopped: %s was not tried because of agent stress", s)
 			break
 		}
 		if !t.OK() {
 			firstBadR = reps
+			r.out.Note = fmt.Sprintf("escalation stopped: %s failed; bisecting below it", s)
 			break
 		}
 		if lastGoodR > 0 && t.Score < prevScore*(1+r.Opts.PlateauGain) {
 			lastGoodR = reps
+			r.out.Note = fmt.Sprintf("escalation stopped at plateau: %s gained under %.0f%% over R=%d", s, 100*r.Opts.PlateauGain, reps/2)
 			break
 		}
 		lastGoodR, prevScore = reps, t.Score
 		if r.out.Stressed {
+			r.out.Note = fmt.Sprintf("escalation stopped after %s because the canary showed agent stress", s)
 			break
 		}
 		reps *= 2

@@ -187,3 +187,11 @@ func TestTryModeRecommendsTheBestRequestedSetting(t *testing.T) {
 		t.Fatalf("try mode compares what was asked for, no headroom step: %+v", rec)
 	}
 }
+
+func TestSearchNoteInText(t *testing.T) {
+	r := fullReport()
+	r.Outcome.Note = "escalation stopped: next step R=8 V=10 (80 varbinds per PDU) exceeds max-product 60"
+	if !strings.Contains(r.Text(), "max-product 60") {
+		t.Fatalf("note missing:\n%s", r.Text())
+	}
+}

@@ -407,3 +407,21 @@ func TestMeasureIsNotVetoedByStress(t *testing.T) {
 		t.Fatalf("a requested setting is measured fully and stress is only noted: %s stressed=%v", settingsOf(o), o.Stressed)
 	}
 }
+
+func TestOutcomeSaysWhyEscalationStopped(t *testing.T) {
+	r, _ := fixture(t, 19, 4, safety.Budget{MaxProduct: 60, MaxTrials: 40}, nil)
+	o := r.Run(context.Background())
+	if !strings.Contains(o.Note, "R=8 V=10") || !strings.Contains(o.Note, "max-product 60") {
+		t.Fatalf("want a note naming the next step and the cap, got %q", o.Note)
+	}
+	r2, _ := fixture(t, 1, 20, safety.Defaults(), nil)
+	o2 := r2.Run(context.Background())
+	if !strings.Contains(o2.Note, "plateau") {
+		t.Fatalf("want a plateau note, got %q", o2.Note)
+	}
+	r3, _ := fixture(t, 1, 100, safety.Defaults(), func(a *sim.Agent) { a.MaxRows = 12 })
+	o3 := r3.Run(context.Background())
+	if !strings.Contains(o3.Note, "R=16 V=1 failed") {
+		t.Fatalf("want a failure note, got %q", o3.Note)
+	}
+}

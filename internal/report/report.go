@@ -183,6 +183,9 @@ func (r Report) Text() string {
 			t.Score, ms(percentile(d, 50)), ms(percentile(d, 99)))
 	}
 	_ = tw.Flush()
+	if r.Outcome.Note != "" {
+		fmt.Fprintf(&sb, "\n%s\n", r.Outcome.Note)
+	}
 	switch {
 	case r.Outcome.Stressed && allRequested(r.Outcome):
 		sb.WriteString("\nCanary showed agent stress between repeats; requested settings were still measured.\n")
@@ -241,12 +244,13 @@ type view struct {
 	Aborted        string          `json:"aborted"`
 	BudgetLimited  string          `json:"budget_limited"`
 	Stressed       bool            `json:"stressed"`
+	Note           string          `json:"note"`
 }
 
 // JSON renders the report as one JSON document without per-PDU detail.
 func (r Report) JSON() ([]byte, error) {
 	v := view{Target: r.Target, ReferencePDUs: r.Reference.PDUs, Recommendation: r.Recommendation,
-		Aborted: r.Outcome.Aborted, BudgetLimited: r.Outcome.BudgetLimited, Stressed: r.Outcome.Stressed,
+		Aborted: r.Outcome.Aborted, BudgetLimited: r.Outcome.BudgetLimited, Stressed: r.Outcome.Stressed, Note: r.Outcome.Note,
 		Reference: []subtreeView{}, Trials: []trialView{}}
 	for _, st := range r.Reference.Subtrees {
 		v.Reference = append(v.Reference, subtreeView{Root: st.Root, OIDs: st.Count(), Bytes: st.Bytes, PerVB: st.MeanBytesPerVarbind(), Columns: len(st.Columns), Partial: st.Partial, Skipped: append([]string{}, st.Skipped...)})
