@@ -39,6 +39,9 @@ func isTerminal(w io.Writer) bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
+// version is set at build time from the git tag (see the Makefile).
+var version = "dev"
+
 // Exit codes.
 const (
 	exitOK      = 0
@@ -69,7 +72,7 @@ type options struct {
 	settings                                                       []walk.Settings
 	budget                                                         safety.Budget
 	search                                                         search.Options
-	dryRun, jsonOut                                                bool
+	dryRun, jsonOut, showVersion                                   bool
 }
 
 func parse(args []string, errw io.Writer) (options, error) {
@@ -94,6 +97,7 @@ func parse(args []string, errw io.Writer) (options, error) {
 	fs.DurationVar(&o.search.Cooldown, "cooldown", o.search.Cooldown, "minimum pause between runs")
 	fs.Float64Var(&o.search.Tolerance, "tolerance", o.search.Tolerance, "percent of reference OIDs a trial may miss")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "print the plan and send nothing")
+	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.jsonOut, "json", false, "print the report as JSON")
 	fs.StringVar(&o.format, "format", "text", "text or opennms (snmp-config.xml definition)")
 	fs.StringVar(&o.pduLog, "pdu-log", "", "append per-PDU telemetry as JSON lines to this file")
@@ -101,6 +105,9 @@ func parse(args []string, errw io.Writer) (options, error) {
 	fs.StringVar(&o.color, "color", "auto", "colour the text report: auto, always or never")
 	if err := fs.Parse(args); err != nil {
 		return o, err
+	}
+	if o.showVersion {
+		return o, nil
 	}
 	if o.target == "" {
 		return o, errors.New("--target is required")
@@ -144,6 +151,10 @@ func run(ctx context.Context, args []string, out, errw io.Writer, dial dialFunc)
 	if err != nil {
 		fmt.Fprintln(errw, "snmptune:", err)
 		return exitUsage
+	}
+	if o.showVersion {
+		fmt.Fprintln(out, "snmptune", version)
+		return exitOK
 	}
 	if dial == nil {
 		dial = dialGoSNMP

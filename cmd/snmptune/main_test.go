@@ -252,3 +252,11 @@ func TestColorFlagAndMTU(t *testing.T) {
 		t.Fatalf("bad --color is a usage error, got %d", code)
 	}
 }
+
+func TestVersionFlag(t *testing.T) {
+	var out, errw bytes.Buffer
+	version = "1.2.3"
+	if code := run(context.Background(), []string{"--version"}, &out, &errw, nil); code != 0 || strings.TrimSpace(out.String()) != "snmptune 1.2.3" {
+		t.Fatalf("want 'snmptune 1.2.3' and exit 0, got %d %q", code, out.String())
+	}
+}

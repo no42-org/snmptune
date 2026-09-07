@@ -1,4 +1,5 @@
 /bin/
+/dist/
 /coverage.out
 /testdata/run/
 
@@ -6,3 +7,4 @@
 _bmad-output/
 _bmad/
 openspec/
+.claude/settings.local.json
