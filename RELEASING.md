@@ -8,7 +8,7 @@ The `Release` workflow runs on every `vX.Y.Z` tag, after the same quality gates 
 
 - Archives for linux, darwin and windows on amd64 and arm64, named `snmptune_X.Y.Z_<os>_<arch>.tar.gz` (`.zip` on Windows), each holding the binary, `LICENSE` and `README.md`.
 - `sbom.spdx.json`, a software bill of materials generated with syft.
-- `checksums.txt` over every artifact, signed with cosign keyless: `checksums.txt.sig` and `checksums.txt.pem`.
+- `checksums.txt` over every artifact, signed with cosign keyless; the signature and certificate travel in the Sigstore bundle `checksums.txt.sigstore.json`.
 - SLSA build provenance attestations for every artifact, verifiable with `gh attestation verify`.
 
 Everything lands on a **draft** GitHub Release. No container image is published; the tool is a single binary.
@@ -30,10 +30,10 @@ Every push to `main` refreshes the rolling `preview` prerelease with binaries na
 
 Check the checksum signature, then the checksum of the archive:
 
-    cosign verify-blob checksums.txt \
-      --signature checksums.txt.sig --certificate checksums.txt.pem \
+    cosign verify-blob --bundle checksums.txt.sigstore.json \
       --certificate-identity-regexp 'https://github.com/no42-org/snmptune/\.github/workflows/release\.yml@.*' \
-      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      checksums.txt
     sha256sum --check --ignore-missing checksums.txt
 
 Verify build provenance of an archive:

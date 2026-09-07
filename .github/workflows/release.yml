@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tag-triggered release: builds the multi-arch binaries, an SBOM, signs the
-# checksums with cosign keyless, attests provenance and creates a draft
+# checksums with cosign keyless (a Sigstore bundle), attests provenance and creates a draft
 # GitHub Release with everything attached. The maintainer adds curated
 # notes and publishes it (see RELEASING.md).
 
@@ -57,8 +57,8 @@ jobs:
           cd dist
           find . -type f | sort | xargs sha256sum > "$RUNNER_TEMP/checksums.txt"
           mv "$RUNNER_TEMP/checksums.txt" checksums.txt
-          cosign sign-blob --yes --output-signature checksums.txt.sig \
-            --output-certificate checksums.txt.pem checksums.txt
+          # cosign 3 writes one Sigstore bundle holding signature and certificate.
+          cosign sign-blob --yes --bundle checksums.txt.sigstore.json checksums.txt
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
