@@ -66,8 +66,6 @@ type Recommendation struct {
 	TimeoutMs  int           `json:"timeout_ms"`
 	Retry      int           `json:"retry"`
 	MaxBytes   int           `json:"max_bytes"`
-	FillPct    int           `json:"datagram_fill_pct"`
-	Fragments  int           `json:"fragments"`
 	Fragmented bool          `json:"fragmented"`
 }
 
@@ -352,6 +350,8 @@ type trialView struct {
 	Failure          string  `json:"failure,omitempty"`
 	MaxBytes         int     `json:"max_bytes"`
 	Fragmented       bool    `json:"fragmented"`
+	FillPct          int     `json:"datagram_fill_pct"`
+	Fragments        int     `json:"fragments"`
 	BestUnfragmented bool    `json:"best_unfragmented"`
 }
 
