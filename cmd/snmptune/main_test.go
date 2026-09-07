@@ -188,3 +188,14 @@ func TestBadPortAndPDULogAreUsageErrorsBeforeAnyPacket(t *testing.T) {
 		t.Fatalf("unwritable pdu log: exit %d %s", code, errw.String())
 	}
 }
+
+func TestSkippedColumnWarnsOnStderr(t *testing.T) {
+	a := sim.New()
+	a.AddTable("1.3.6.1.2.1.2.2", 2, 3)
+	a.Misorder = map[string]string{"1.3.6.1.2.1.2.2.1.1.2": "1.3.6.1.2.1.2.2.1.1.1"}
+	var out, errw bytes.Buffer
+	code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.2.2", "--repeats", "1", "--cooldown", "0"}, &out, &errw, simDial(a))
+	if code != 0 || !strings.Contains(errw.String(), "misorder") || !strings.Contains(errw.String(), "1.3.6.1.2.1.2.2.1.1") {
+		t.Fatalf("want exit 0 and a warning naming the column, got %d\n%s", code, errw.String())
+	}
+}

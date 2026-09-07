@@ -61,6 +61,7 @@ type Result struct {
 	OIDs        []string // in-scope OIDs collected from tables
 	Varbinds    int      // in-scope varbinds, tables plus scalars
 	Duration    time.Duration
+	Skips       []string // prefixes skipped because the agent misordered them
 	Timeouts    int
 	AgentErrors int
 	Truncations int
@@ -105,6 +106,7 @@ func (l *JSONLines) Log(p PDU) {
 type column struct {
 	oid    string
 	cursor string
+	jumped bool // skipped within the current response; ignore its remaining rows
 }
 
 type walker struct {
@@ -188,6 +190,9 @@ func (wk *walker) table(chunk []string, reps uint32) error {
 		finished := make([]bool, width)
 		anyFinished := false
 		lastRowAllEnd := n > 0
+		for _, c := range active {
+			c.jumped = false
+		}
 		for idx, vb := range resp.Varbinds {
 			i, r := idx%width, idx/width
 			_, end := vb.Value.(agent.EndOfMibView)
@@ -195,7 +200,7 @@ func (wk *walker) table(chunk []string, reps uint32) error {
 				lastRowAllEnd = false
 			}
 			c := active[i]
-			if finished[i] {
+			if finished[i] || c.jumped {
 				continue
 			}
 			if end || !oid.HasPrefix(vb.OID, c.oid) {
@@ -203,9 +208,16 @@ func (wk *walker) table(chunk []string, reps uint32) error {
 				continue
 			}
 			if oid.Compare(vb.OID, c.cursor) <= 0 {
-				p.Rows, p.Error = r, "not advancing"
-				wk.emit(p)
-				return fmt.Errorf("%w: column %s: agent returned %s after %s, not advancing", errWalk, c.oid, vb.OID, c.cursor)
+				// Misordered agent: continue past the shared prefix and
+				// ignore the rest of this column in this response.
+				target := oid.SkipTarget(c.cursor, vb.OID)
+				wk.res.Skips = append(wk.res.Skips, c.oid)
+				p.Error = "misordered, skipped"
+				c.cursor, c.jumped = target, true
+				if !oid.HasPrefix(target, c.oid) {
+					finished[i], anyFinished = true, true
+				}
+				continue
 			}
 			c.cursor = vb.OID
 			wk.res.OIDs = append(wk.res.OIDs, vb.OID)

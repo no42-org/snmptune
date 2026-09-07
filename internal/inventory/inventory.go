@@ -34,6 +34,7 @@ type Subtree struct {
 	OIDs    []string // sorted, as returned by the agent
 	Bytes   int      // sum of response bytes
 	Columns []uint32 // column arcs when the subtree is a table
+	Skipped []string // prefixes skipped because the agent misordered them
 	Partial bool
 }
 
@@ -103,7 +104,14 @@ func Walk(ctx context.Context, tr agent.Transport, roots []string, b Budget) (In
 					break
 				}
 				if oid.Compare(vb.OID, cursor) <= 0 {
-					return inv, fmt.Errorf("reference walk of %s: agent returned %s after %s, not advancing", root, vb.OID, cursor)
+					// Misordered agent: skip the rest of the shared prefix.
+					target := oid.SkipTarget(cursor, vb.OID)
+					st.Skipped = append(st.Skipped, parentOf(target))
+					if !oid.HasPrefix(target, root) {
+						done = true
+					}
+					cursor = target
+					break
 				}
 				st.OIDs = append(st.OIDs, vb.OID)
 				cursor = vb.OID
@@ -118,6 +126,16 @@ func Walk(ctx context.Context, tr agent.Transport, roots []string, b Budget) (In
 	}
 	inv.Duration = now().Sub(start)
 	return inv, nil
+}
+
+// parentOf returns the OID one arc shorter.
+func parentOf(o string) string {
+	arcs := oid.Parse(o)
+	if len(arcs) == 0 {
+		return o
+	}
+	last := arcs[len(arcs)-1] - 1
+	return oid.Format(append(arcs[:len(arcs)-1:len(arcs)-1], last))
 }
 
 // inferColumns returns the distinct column arcs when every OID under root has

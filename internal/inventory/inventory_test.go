@@ -102,3 +102,26 @@ func TestCancelledContextGivesPartialInventory(t *testing.T) {
 		t.Fatal("want partial inventory")
 	}
 }
+
+func TestMisorderedColumnIsSkippedAndRecorded(t *testing.T) {
+	a := sim.New()
+	a.AddTable("1.3.6.1.2.1.2.2", 2, 3)
+	a.Misorder = map[string]string{"1.3.6.1.2.1.2.2.1.1.2": "1.3.6.1.2.1.2.2.1.1.1"}
+	inv, err := Walk(context.Background(), a, []string{"1.3.6.1.2.1.2.2"}, Budget{})
+	if err != nil {
+		t.Fatalf("misordering must not be an error: %v", err)
+	}
+	st := inv.Subtrees[0]
+	want := []string{"1.3.6.1.2.1.2.2.1.1.1", "1.3.6.1.2.1.2.2.1.1.2", "1.3.6.1.2.1.2.2.1.2.1", "1.3.6.1.2.1.2.2.1.2.2", "1.3.6.1.2.1.2.2.1.2.3"}
+	if len(st.OIDs) != len(want) {
+		t.Fatalf("want %v, got %v", want, st.OIDs)
+	}
+	for i := range want {
+		if st.OIDs[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, st.OIDs)
+		}
+	}
+	if len(st.Skipped) != 1 || st.Skipped[0] != "1.3.6.1.2.1.2.2.1.1" {
+		t.Fatalf("want skipped column 1, got %v", st.Skipped)
+	}
+}

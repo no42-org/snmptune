@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/no42-org/snmptune/internal/agent/sim"
+	"github.com/no42-org/snmptune/internal/inventory"
 	"github.com/no42-org/snmptune/internal/workload"
 )
 
@@ -93,7 +94,7 @@ func TestTruncationVersusEndOfTable(t *testing.T) {
 	}
 }
 
-func TestLoopingAgentAbortsColumn(t *testing.T) {
+func TestLoopingAgentIsSkippedNotFailed(t *testing.T) {
 	a := sim.New()
 	a.AddTable("1.3.6.1.2.1.2.2", 1, 10)
 	a.LoopOID = "1.3.6.1.2.1.2.2.1.1.4"
@@ -102,8 +103,34 @@ func TestLoopingAgentAbortsColumn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Failure, "not advancing") || len(a.Requests()) > 4 {
-		t.Fatalf("looping agent must abort the column: failure=%q requests=%d", res.Failure, len(a.Requests()))
+	if res.Failure != "" || len(res.Skips) != 1 || len(a.Requests()) > 6 {
+		t.Fatalf("looping agent must be skipped: failure=%q skips=%v requests=%d", res.Failure, res.Skips, len(a.Requests()))
+	}
+	// Rows 1-4 are collected, the cursor jumps to .5 and rows 6-10 follow;
+	// the jump target itself is the one row the skip costs.
+	if len(res.OIDs) != 9 {
+		t.Fatalf("want 9 rows, got %d", len(res.OIDs))
+	}
+}
+
+func TestReferenceAndTrialAgreeOnMisorderedColumn(t *testing.T) {
+	mk := func() *sim.Agent {
+		a := sim.New()
+		a.AddTable("1.3.6.1.2.1.2.2", 2, 3)
+		a.Misorder = map[string]string{"1.3.6.1.2.1.2.2.1.1.2": "1.3.6.1.2.1.2.2.1.1.1"}
+		return a
+	}
+	inv, err := inventory.Walk(context.Background(), mk(), []string{"1.3.6.1.2.1.2.2"}, inventory.Budget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := workload.Workload{Tables: []workload.Table{{Base: "1.3.6.1.2.1.2.2", Columns: cols("1.3.6.1.2.1.2.2", 1, 2)}}}
+	res, err := Run(context.Background(), mk(), w, Settings{MaxRepetitions: 2, MaxVarsPerPDU: 10}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failure != "" || Missing(inv.Subtrees[0].OIDs, res.OIDs) != 0 || len(res.OIDs) != len(inv.Subtrees[0].OIDs) {
+		t.Fatalf("trial must match reference: failure=%q ref=%v got=%v", res.Failure, inv.Subtrees[0].OIDs, res.OIDs)
 	}
 }
 

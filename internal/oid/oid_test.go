@@ -38,3 +38,17 @@ func TestHasPrefix(t *testing.T) {
 		t.Fatal("an oid is its own prefix")
 	}
 }
+
+func TestSkipTargetIsNextSiblingOfSharedPrefix(t *testing.T) {
+	col := "1.3.6.1.4.1.52642.1.1.10.2.5.1.2.4.1.1"
+	got := SkipTarget(col+".27.49.46.48", col+".19.49.46.51")
+	if got != "1.3.6.1.4.1.52642.1.1.10.2.5.1.2.4.1.2" {
+		t.Fatalf("want next column, got %s", got)
+	}
+	if got := SkipTarget("1.3.6.1.2.1.2.2.1.1.4", "1.3.6.1.2.1.2.2.1.1.4"); got != "1.3.6.1.2.1.2.2.1.1.5" {
+		t.Fatalf("looping agent: want next sibling of the oid itself, got %s", got)
+	}
+	if got := SkipTarget("1.3.6.1.2.1.2", "1.3.6.1.2.1.1"); got != "1.3.6.1.2.2" {
+		t.Fatalf("shared prefix 1.3.6.1.2.1 -> 1.3.6.1.2.2, got %s", got)
+	}
+}

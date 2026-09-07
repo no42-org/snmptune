@@ -193,6 +193,9 @@ func run(ctx context.Context, args []string, out, errw io.Writer, dial dialFunc)
 	complete := inventory.Inventory{PDUs: ref.PDUs, Duration: ref.Duration}
 	partial := map[string]bool{}
 	for _, st := range ref.Subtrees {
+		for _, sk := range st.Skipped {
+			fmt.Fprintf(errw, "warning: agent misordered %s (OID not increasing), rest of it skipped\n", sk)
+		}
 		if st.Partial {
 			partial[st.Root] = true
 			fmt.Fprintf(errw, "warning: dropped %s from the trials, the reference walk hit --max-oids or --max-duration before finishing it\n", st.Root)

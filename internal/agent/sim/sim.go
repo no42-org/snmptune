@@ -44,6 +44,9 @@ type Agent struct {
 	// LoopOID, when set, makes the agent answer a GetNext or GetBulk step
 	// from that OID with the same OID again, like a buggy agent.
 	LoopOID string
+	// Misorder maps a cursor to the OID the agent answers with instead of
+	// the true successor, to simulate an agent that sorts indices as text.
+	Misorder map[string]string
 	// ErrorAbove makes GetBulk answer with an agent error (tooBig) when more
 	// than this many varbinds are requested. Zero disables.
 	ErrorAbove int
@@ -192,6 +195,9 @@ func (a *Agent) beginLocked() {
 func (a *Agent) nextLocked(arcs []uint32) agent.Varbind {
 	if a.LoopOID != "" && oid.CompareArcs(arcs, oid.Parse(a.LoopOID)) == 0 {
 		return agent.Varbind{OID: oid.Canonical(a.LoopOID), Value: a.values[oid.Canonical(a.LoopOID)]}
+	}
+	if wrong, ok := a.Misorder[oid.Format(arcs)]; ok {
+		return agent.Varbind{OID: wrong, Value: a.values[wrong]}
 	}
 	i := sort.Search(len(a.arcs), func(i int) bool { return oid.CompareArcs(a.arcs[i], arcs) > 0 })
 	if i == len(a.keys) {

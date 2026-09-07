@@ -154,6 +154,9 @@ func (r Report) Text() string {
 			kind = fmt.Sprintf("table, %d columns", len(st.Columns))
 		}
 		fmt.Fprintf(&sb, "  %s: %d OIDs, %.0f B/varbind (%s)\n", st.Root, st.Count(), st.MeanBytesPerVarbind(), kind)
+		for _, sk := range st.Skipped {
+			fmt.Fprintf(&sb, "    warning: agent misordered %s, rest of it skipped\n", sk)
+		}
 	}
 	sb.WriteString("\nTrials\n")
 	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
@@ -205,12 +208,13 @@ type trialView struct {
 }
 
 type subtreeView struct {
-	Root    string  `json:"root"`
-	OIDs    int     `json:"oids"`
-	Bytes   int     `json:"bytes"`
-	PerVB   float64 `json:"bytes_per_varbind"`
-	Columns int     `json:"columns"`
-	Partial bool    `json:"partial"`
+	Root    string   `json:"root"`
+	OIDs    int      `json:"oids"`
+	Bytes   int      `json:"bytes"`
+	PerVB   float64  `json:"bytes_per_varbind"`
+	Columns int      `json:"columns"`
+	Partial bool     `json:"partial"`
+	Skipped []string `json:"skipped"`
 }
 
 type view struct {
@@ -230,7 +234,7 @@ func (r Report) JSON() ([]byte, error) {
 		Aborted: r.Outcome.Aborted, BudgetLimited: r.Outcome.BudgetLimited, Stressed: r.Outcome.Stressed,
 		Reference: []subtreeView{}, Trials: []trialView{}}
 	for _, st := range r.Reference.Subtrees {
-		v.Reference = append(v.Reference, subtreeView{Root: st.Root, OIDs: st.Count(), Bytes: st.Bytes, PerVB: st.MeanBytesPerVarbind(), Columns: len(st.Columns), Partial: st.Partial})
+		v.Reference = append(v.Reference, subtreeView{Root: st.Root, OIDs: st.Count(), Bytes: st.Bytes, PerVB: st.MeanBytesPerVarbind(), Columns: len(st.Columns), Partial: st.Partial, Skipped: append([]string{}, st.Skipped...)})
 	}
 	for _, t := range r.Outcome.Trials {
 		d, _ := rtts(t)

@@ -62,6 +62,32 @@ func HasPrefix(o, prefix string) bool {
 	return CompareArcs(a[:len(p)], p) == 0
 }
 
+// SkipTarget is where a walk continues after an agent answered request
+// with an OID that is not greater: the next sibling of the deepest arc the
+// two OIDs share. For a misordered table column that is the next column.
+func SkipTarget(request, answer string) string {
+	a, b := Parse(request), Parse(answer)
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	if n == 0 {
+		n = 1
+	}
+	arcs := append([]uint32(nil), a[:n]...)
+	arcs[n-1]++
+	return Format(arcs)
+}
+
+// Format renders arcs as a dotted OID.
+func Format(arcs []uint32) string {
+	parts := make([]string, len(arcs))
+	for i, v := range arcs {
+		parts[i] = strconv.FormatUint(uint64(v), 10)
+	}
+	return strings.Join(parts, ".")
+}
+
 // Canonical returns the OID without a leading dot.
 func Canonical(s string) string {
 	return strings.TrimPrefix(s, ".")

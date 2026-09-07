@@ -168,3 +168,12 @@ func TestRetriesReported(t *testing.T) {
 		t.Fatalf("want Retries 1, got %+v %v", r, err)
 	}
 }
+
+func TestMisorderAnswersWithGivenOID(t *testing.T) {
+	a := newTable(t, 3, 1)
+	a.Misorder = map[string]string{"1.3.6.1.2.1.2.2.1.1.2": "1.3.6.1.2.1.2.2.1.1.1"}
+	r, err := a.GetNext(context.Background(), []string{"1.3.6.1.2.1.2.2.1.1.2"})
+	if err != nil || r.Varbinds[0].OID != "1.3.6.1.2.1.2.2.1.1.1" {
+		t.Fatalf("want the configured smaller OID, got %+v %v", r, err)
+	}
+}

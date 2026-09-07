@@ -31,6 +31,8 @@ A run has four phases:
    The timeout is three times the p99 round-trip time at the recommended setting, rounded up to 100 ms, never below 500 ms.
 
 A trial fails on any timeout, on an agent error status such as tooBig, on a truncated response, or when more than one percent of the reference OIDs are missing.
+Some agents sort string-indexed rows as text and answer a walk with an OID smaller than the one requested, which net-snmp reports as "OID not increasing".
+snmptune skips the rest of that column, continues with the next one, warns on stderr and lists the skipped columns in the report.
 A response is truncated when the agent returned fewer rows than requested before every repeater reached the end of the MIB view.
 
 ## Safety

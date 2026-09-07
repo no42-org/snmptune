@@ -164,3 +164,16 @@ func TestRetriedPDUsExcludedFromPercentiles(t *testing.T) {
 		t.Fatalf("retried PDU must not drive p99: %+v", rec)
 	}
 }
+
+func TestSkippedColumnsReported(t *testing.T) {
+	r := fullReport()
+	r.Reference.Subtrees[0].Skipped = []string{"1.3.6.1.4.1.52642.1.1.10.2.5.1.2.4.1.1"}
+	text := r.Text()
+	if !strings.Contains(text, "misorder") || !strings.Contains(text, "52642.1.1.10.2.5.1.2.4.1.1") {
+		t.Fatalf("text must name the skipped column:\n%s", text)
+	}
+	raw, _ := r.JSON()
+	if !strings.Contains(string(raw), `"skipped"`) || !strings.Contains(string(raw), "52642.1.1.10.2.5.1.2.4.1.1") {
+		t.Fatalf("json must carry skipped columns: %s", raw)
+	}
+}
