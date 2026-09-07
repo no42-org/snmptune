@@ -1,0 +1,38 @@
+name: Bug report
+description: snmptune did something wrong or unexpected
+labels: [bug, triage]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: snmptune version
+      description: Output of `snmptune --version`
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command, with the community string redacted
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The report and any warnings on stderr
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: Device model, firmware, or SNMP agent software if known

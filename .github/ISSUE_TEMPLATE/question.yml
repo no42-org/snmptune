@@ -1,0 +1,11 @@
+name: Question
+description: Ask how to use snmptune or how to read a report
+labels: [question, triage]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Include the command you ran and the report, with the community string redacted
+    validations:
+      required: true
