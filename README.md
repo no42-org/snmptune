@@ -2,6 +2,10 @@
 
 Measures one SNMP v2c agent and recommends the `max-repetitions`, `max-vars-per-pdu`, `timeout` and `retry` values for OpenNMS `snmp-config.xml`.
 
+[![CI](https://github.com/no42-org/snmptune/actions/workflows/ci.yml/badge.svg)](https://github.com/no42-org/snmptune/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/no42-org/snmptune?include_prereleases)](https://github.com/no42-org/snmptune/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 OpenNMS ships conservative defaults (max-repetitions 2, max-vars-per-pdu 10) and operators tune them by guesswork.
 Too low wastes collection time on large tables.
 Too high overruns the agent's message size, fragments on the wire, or trips control-plane policing, and the failures look like random timeouts.
@@ -57,6 +61,18 @@ snmptune is a load generator pointed at gear people depend on, so the defaults a
 Where you run it from matters.
 Run from the OpenNMS server or Minion so the timeout reflects the real path, but pick a quiet window.
 If collectd is polling the same agent, the agent sees both loads and the numbers are skewed.
+
+## Install
+
+Download the archive for your platform from the [releases page](https://github.com/no42-org/snmptune/releases), unpack it, and put `snmptune` on your `PATH`.
+Archives exist for Linux, macOS and Windows on amd64 and arm64.
+`RELEASING.md` shows how to verify the signature and provenance of a download.
+
+With a Go toolchain:
+
+```
+go install github.com/no42-org/snmptune/cmd/snmptune@latest
+```
 
 ## Usage
 
@@ -158,11 +174,15 @@ With `--format opennms`:
 ## Development
 
 ```
-make build        # bin/snmptune
-make test         # unit tests against the simulated agent
-make lint         # go vet and golangci-lint
-make integration  # starts net-snmp snmpd on a high port, runs the integration tests
+make build           # bin/snmptune
+make test            # unit tests against the simulated agent
+make lint            # go vet and golangci-lint
+make lint-workflows  # actionlint over .github/workflows
+make integration     # starts net-snmp snmpd on a high port, runs the integration tests
+make release-build   # multi-arch archives into dist/
 ```
+
+See `CONTRIBUTING.md` for the workflow, commit conventions and the DCO, `RELEASING.md` for how releases are cut and verified, and `SECURITY.md` for reporting vulnerabilities.
 
 The search, walker and report are tested against `internal/agent/sim`, an in-memory agent that can truncate responses, simulate round-trip time and restart itself.
 The integration tests need `snmpd` on `PATH` and skip otherwise.
