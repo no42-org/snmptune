@@ -1,0 +1,47 @@
+# Copyright 2026 Ronny Trommer <ronny@no42.org>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every push to main refreshes the rolling "preview" prerelease with
+# binaries from the latest commit. It never touches version tags.
+
+name: Preview
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    uses: ./.github/workflows/quality-gates.yml
+
+  preview:
+    needs: gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make release-build VERSION=preview
+      - name: Refresh the rolling preview prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view preview >/dev/null 2>&1 || \
+            gh release create preview --prerelease --title "Preview (main)" \
+              --notes "Unstable build from main. Not a supported release."
+          gh release edit preview --prerelease \
+            --notes "Unstable build from main @ ${GITHUB_SHA:0:7}. Not a supported release."
+          find dist -type f -exec gh release upload preview --clobber {} +
