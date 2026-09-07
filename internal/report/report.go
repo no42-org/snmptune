@@ -49,7 +49,9 @@ func Recommend(o search.Outcome) (rec Recommendation, ok bool) {
 		return rec, false
 	}
 	chosen := peak
-	if peak.Settings == search.Start {
+	if allRequested(o) {
+		rec.Reason = fmt.Sprintf("best of the requested settings (%.0f varbinds/s); no headroom step in try mode", peak.Score)
+	} else if peak.Settings == search.Start {
 		rec.Reason = "the agent did not sustain more than the OpenNMS default without errors"
 	} else {
 		var below *search.Trial
@@ -80,6 +82,16 @@ func Recommend(o search.Outcome) (rec Recommendation, ok bool) {
 		rec.Retry = 2
 	}
 	return rec, true
+}
+
+// allRequested reports whether every trial came from --try.
+func allRequested(o search.Outcome) bool {
+	for _, t := range o.Trials {
+		if t.Phase != "try" {
+			return false
+		}
+	}
+	return len(o.Trials) > 0
 }
 
 // SuggestTimeout is three times the p99 round-trip time, rounded up to
@@ -171,7 +183,10 @@ func (r Report) Text() string {
 			t.Score, ms(percentile(d, 50)), ms(percentile(d, 99)))
 	}
 	_ = tw.Flush()
-	if r.Outcome.Stressed {
+	switch {
+	case r.Outcome.Stressed && allRequested(r.Outcome):
+		sb.WriteString("\nCanary showed agent stress between repeats; requested settings were still measured.\n")
+	case r.Outcome.Stressed:
 		sb.WriteString("\nCanary showed agent stress; escalation was stopped early.\n")
 	}
 	sb.WriteString("\nRecommendation\n")

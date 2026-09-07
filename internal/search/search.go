@@ -109,22 +109,42 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// Run executes the search. It never returns an error: everything that stops
-// a run is recorded in the Outcome so a report can still be produced.
-func (r *Runner) Run(ctx context.Context) Outcome {
+// init prepares a run; ceiling is the first product that must not be tried.
+func (r *Runner) init(ceiling int) (v0, widest int) {
 	r.out = Outcome{}
-	r.ceiling = r.Budget.MaxProduct + 1
+	r.ceiling = ceiling
 	r.measured = map[walk.Settings]bool{}
 	r.refOIDs = referenceOIDs(r.Reference, r.Workload)
 	if r.Sleep == nil {
 		r.Sleep = sleep
 	}
-	widest := r.Workload.WidestTable()
-	v0 := Start.MaxVarsPerPDU
+	widest = r.Workload.WidestTable()
+	v0 = Start.MaxVarsPerPDU
 	if widest > 0 {
 		v0 = min(v0, widest)
 	}
 	r.startProduct = int(Start.MaxRepetitions) * v0
+	return v0, widest
+}
+
+// Measure runs exactly the given settings, in order, with the same repeats,
+// canary and cooldown as the search. It is for verifying or comparing
+// settings the operator names.
+func (r *Runner) Measure(ctx context.Context, settings []walk.Settings) Outcome {
+	r.init(int(^uint(0) >> 1))
+	for _, s := range settings {
+		if _, stop := r.trial(ctx, s, "try"); stop {
+			return r.out
+		}
+	}
+	r.finalProbe(ctx)
+	return r.out
+}
+
+// Run executes the search. It never returns an error: everything that stops
+// a run is recorded in the Outcome so a report can still be produced.
+func (r *Runner) Run(ctx context.Context) Outcome {
+	v0, widest := r.init(r.Budget.MaxProduct + 1)
 
 	// Escalate.
 	reps := Start.MaxRepetitions
@@ -179,8 +199,8 @@ func (r *Runner) Run(ctx context.Context) Outcome {
 	// Split.
 	if lastGoodR > 0 {
 		product := int(lastGoodR) * v0
-		for _, v := range SplitVars {
-			if v == v0 || (widest > 0 && v > widest) || product/v < 1 {
+		for _, v := range splitCandidates(v0, widest) {
+			if product/v < 1 {
 				continue
 			}
 			if _, stop := r.trial(ctx, walk.Settings{MaxRepetitions: uint32(product / v), MaxVarsPerPDU: v}, "split"); stop {
@@ -190,6 +210,23 @@ func (r *Runner) Run(ctx context.Context) Outcome {
 	}
 	r.finalProbe(ctx)
 	return r.out
+}
+
+// splitCandidates are the max-vars-per-pdu values tried at the final
+// product: the standard ladder capped at the widest table, plus the table
+// width itself so "every column in one PDU" is always measured.
+func splitCandidates(v0, widest int) []int {
+	var out []int
+	for _, v := range SplitVars {
+		if v != v0 && (widest == 0 || v <= widest) {
+			out = append(out, v)
+		}
+	}
+	if widest > 0 && widest != v0 && !slices.Contains(out, widest) {
+		out = append(out, widest)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // referenceOIDs keeps only the inventory OIDs the workload actually walks:
@@ -287,9 +324,12 @@ func (r *Runner) trial(ctx context.Context, s walk.Settings, phase string) (*Tri
 			return r.abort(fmt.Sprintf("agent stopped answering canary probes after trial %s", r.lastSet), s, phase, runs)
 		case safety.Stressed:
 			// Stop escalating, but always measure the first setting so the
-			// report has at least the default to say something about.
+			// report has at least the default to say something about. A
+			// requested setting is never vetoed: the operator asked for it.
 			r.out.Stressed = true
-			r.ceiling = min(r.ceiling, max(r.lastGood, r.startProduct)+1)
+			if phase != "try" {
+				r.ceiling = min(r.ceiling, max(r.lastGood, r.startProduct)+1)
+			}
 			if s.Product() >= r.ceiling {
 				if len(runs) > 0 {
 					r.record(s, phase, runs, fmt.Sprintf("aborted: agent stressed before repeat %d", i+1))
@@ -395,10 +435,8 @@ func Plan(w workload.Workload, b safety.Budget, o Options) string {
 		n++
 	}
 	var vs []string
-	for _, v := range SplitVars {
-		if v != v0 && (widest == 0 || v <= widest) {
-			vs = append(vs, fmt.Sprint(v))
-		}
+	for _, v := range splitCandidates(v0, widest) {
+		vs = append(vs, fmt.Sprint(v))
 	}
 	fmt.Fprintf(&sb, "Split phase: V in {%s} at the final product\n", strings.Join(vs, ", "))
 	fmt.Fprintf(&sb, "Per trial repeat, worst case under the OID budget: about %d PDUs and %d bytes; "+

@@ -362,3 +362,48 @@ func TestSleepHonoursContext(t *testing.T) {
 		t.Fatal("sleep must return on cancel")
 	}
 }
+
+func TestMeasureRunsExactlyTheGivenSettings(t *testing.T) {
+	r, _ := fixture(t, 19, 4, safety.Defaults(), nil)
+	want := []walk.Settings{{MaxRepetitions: 4, MaxVarsPerPDU: 10}, {MaxRepetitions: 2, MaxVarsPerPDU: 20}}
+	o := r.Measure(context.Background(), want)
+	if len(o.Trials) != 2 || o.Trials[0].Settings != want[0] || o.Trials[1].Settings != want[1] {
+		t.Fatalf("want exactly the two requested trials in order: %s", settingsOf(o))
+	}
+	for _, tr := range o.Trials {
+		if tr.Phase != "try" || !tr.OK() || len(tr.Runs) != r.Opts.Repeats {
+			t.Fatalf("each requested setting is measured with all repeats: %+v", tr)
+		}
+	}
+}
+
+func TestSplitTriesTheTableWidth(t *testing.T) {
+	// 19 columns: V=20 and V=50 are wider than the table, so V=19 (all columns
+	// in one PDU) must be tried instead.
+	r, _ := fixture(t, 19, 4, safety.Budget{MaxProduct: 40, MaxTrials: 40}, nil)
+	o := r.Run(context.Background())
+	seen := map[int]bool{}
+	for _, tr := range o.Trials {
+		if tr.Phase == "split" {
+			seen[tr.Settings.MaxVarsPerPDU] = true
+		}
+	}
+	if !seen[19] || !seen[5] || seen[20] {
+		t.Fatalf("want split V in {5, 19}: %s", settingsOf(o))
+	}
+}
+
+func TestMeasureIsNotVetoedByStress(t *testing.T) {
+	r, a := fixture(t, 19, 4, safety.Defaults(), nil)
+	base := a.RTT
+	a.RTT = func(n int) time.Duration {
+		if n == 1 {
+			return 100 * time.Millisecond // every canary is slow
+		}
+		return base(n)
+	}
+	o := r.Measure(context.Background(), []walk.Settings{{MaxRepetitions: 4, MaxVarsPerPDU: 10}})
+	if len(o.Trials) != 1 || !o.Trials[0].OK() || len(o.Trials[0].Runs) != r.Opts.Repeats || !o.Stressed {
+		t.Fatalf("a requested setting is measured fully and stress is only noted: %s stressed=%v", settingsOf(o), o.Stressed)
+	}
+}

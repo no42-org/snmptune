@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +208,28 @@ func TestLeadingDotOIDsAreAccepted(t *testing.T) {
 	code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", ".1.3.6.1.2.1.2.2", "--repeats", "1", "--cooldown", "0"}, &out, &errw, simDial(a))
 	if code != 0 || !strings.Contains(out.String(), "max-repetitions") {
 		t.Fatalf("a leading dot is the net-snmp spelling and must work: exit %d\n%s", code, errw.String())
+	}
+}
+
+func TestTryFlagMeasuresGivenSettings(t *testing.T) {
+	a := sim.New()
+	a.AddTable("1.3.6.1.2.1.31.1.1", 19, 4)
+	a.RTT = func(n int) time.Duration { return time.Millisecond + time.Duration(n)*20*time.Microsecond }
+	var out, errw bytes.Buffer
+	code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.31.1.1", "--try", "4:10", "--try", "2:20", "--repeats", "1", "--cooldown", "0"}, &out, &errw, simDial(a))
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, errw.String())
+	}
+	text := out.String()
+	if !strings.Contains(text, "try") || strings.Contains(text, "escalate") {
+		t.Fatalf("try mode must skip the search:\n%s", text)
+	}
+	for _, want := range []string{`try\s+4\s+10\s`, `try\s+2\s+20\s`} {
+		if !regexp.MustCompile(want).MatchString(text) {
+			t.Fatalf("trial table missing %q:\n%s", want, text)
+		}
+	}
+	if code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.31.1.1", "--try", "4x10"}, &out, &errw, nil); code != 2 {
+		t.Fatalf("malformed --try is a usage error, got %d", code)
 	}
 }

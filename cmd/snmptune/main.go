@@ -55,7 +55,8 @@ type options struct {
 	target, community, group, referenceTree, format, pduLog string
 	port, retries                                           int
 	timeout                                                 time.Duration
-	oids                                                    multiFlag
+	oids, tries                                             multiFlag
+	settings                                                []walk.Settings
 	budget                                                  safety.Budget
 	search                                                  search.Options
 	dryRun, jsonOut                                         bool
@@ -74,6 +75,7 @@ func parse(args []string, errw io.Writer) (options, error) {
 	fs.Var(&o.oids, "oid", "subtree to query (repeatable); 1.3.6.1 opts in to the whole tree")
 	fs.StringVar(&o.group, "group", "", "OpenNMS datacollection XML file, optionally :group-name")
 	fs.StringVar(&o.referenceTree, "reference-tree", "", "additional subtree for the reference inventory only")
+	fs.Var(&o.tries, "try", "measure this R:V setting instead of searching (repeatable, e.g. --try 4:10)")
 	fs.DurationVar(&o.budget.MaxDuration, "max-duration", o.budget.MaxDuration, "stop the run after this long")
 	fs.IntVar(&o.budget.MaxTrials, "max-trials", o.budget.MaxTrials, "stop after this many trials")
 	fs.IntVar(&o.budget.MaxProduct, "max-product", o.budget.MaxProduct, "never request more than R x V varbinds per PDU")
@@ -102,6 +104,13 @@ func parse(args []string, errw io.Writer) (options, error) {
 	}
 	if o.port < 1 || o.port > 65535 {
 		return o, fmt.Errorf("--port %d is out of range 1-65535", o.port)
+	}
+	for _, t := range o.tries {
+		var s walk.Settings
+		if n, err := fmt.Sscanf(t, "%d:%d", &s.MaxRepetitions, &s.MaxVarsPerPDU); n != 2 || err != nil || s.MaxRepetitions < 1 || s.MaxVarsPerPDU < 1 {
+			return o, fmt.Errorf("--try %q: want R:V with both at least 1, e.g. 4:10", t)
+		}
+		o.settings = append(o.settings, s)
 	}
 	return o, nil
 }
@@ -240,7 +249,12 @@ func run(ctx context.Context, args []string, out, errw io.Writer, dial dialFunc)
 		Logger: logger, Opts: o.search,
 		Progress: func(line string) { fmt.Fprintln(errw, line) },
 	}
-	outcome := runner.Run(ctx)
+	var outcome search.Outcome
+	if len(o.settings) > 0 {
+		outcome = runner.Measure(ctx, o.settings)
+	} else {
+		outcome = runner.Run(ctx)
+	}
 	rep := report.Build(o.target, shown, outcome)
 
 	switch {

@@ -177,3 +177,13 @@ func TestSkippedColumnsReported(t *testing.T) {
 		t.Fatalf("json must carry skipped columns: %s", raw)
 	}
 }
+
+func TestTryModeRecommendsTheBestRequestedSetting(t *testing.T) {
+	a := trial(4, 10, 2253, "", time.Millisecond)
+	b := trial(2, 20, 1900, "", time.Millisecond)
+	a.Phase, b.Phase = "try", "try"
+	rec, ok := Recommend(search.Outcome{Trials: []search.Trial{a, b}})
+	if !ok || rec.Settings != a.Settings || !strings.Contains(rec.Reason, "requested") {
+		t.Fatalf("try mode compares what was asked for, no headroom step: %+v", rec)
+	}
+}
