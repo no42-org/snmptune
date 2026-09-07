@@ -317,3 +317,48 @@ func TestStressNoteNotDuplicated(t *testing.T) {
 		t.Fatalf("stress should be mentioned once, got %d:\n%s", n, r.Text())
 	}
 }
+
+func TestDatagramFillAndOverflowShown(t *testing.T) {
+	r := fragReport()
+	text := r.Text()
+	if !strings.Contains(text, "fill") {
+		t.Fatalf("fill column missing:\n%s", text)
+	}
+	var big, mid string
+	for _, l := range strings.Split(text, "\n") {
+		if strings.Contains(l, "1674") {
+			big = l
+		}
+		if strings.Contains(l, "858") && strings.Contains(l, "try") {
+			mid = l
+		}
+	}
+	if !strings.Contains(mid, "58%") {
+		t.Fatalf("858 of 1472 is 58%%: %q", mid)
+	}
+	if !strings.Contains(big, "114%") || !strings.Contains(big, "2 fragments") || !strings.Contains(big, "202 B over") {
+		t.Fatalf("1674 of 1472 is 114%%, 2 fragments, 202 B over: %q", big)
+	}
+	if !strings.Contains(text, "largest response 858 B (58% of a 1472 B datagram)") {
+		t.Fatalf("recommendation must show the fill:\n%s", text)
+	}
+}
+
+func TestFragmentCount(t *testing.T) {
+	cases := map[int]int{500: 1, 1472: 1, 1473: 2, 1674: 2, 2960: 3, 4000: 3, 4500: 4}
+	for bytes, want := range cases {
+		if got := Fragments(bytes, DefaultMTU); got != want {
+			t.Errorf("%d B at MTU 1500: want %d fragments, got %d", bytes, want, got)
+		}
+	}
+}
+
+func TestJSONCarriesFill(t *testing.T) {
+	raw, _ := fragReport().JSON()
+	s := string(raw)
+	for _, want := range []string{`"datagram_fill_pct": 114`, `"fragments": 2`, `"datagram_fill_pct": 58`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("json missing %s:\n%s", want, s)
+		}
+	}
+}
