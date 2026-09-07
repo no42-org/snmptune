@@ -13,7 +13,6 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/no42-org/snmptune/internal/inventory"
@@ -242,41 +241,60 @@ func (r Report) Text() string {
 	limit := DatagramLimit(r.MTU)
 	best := bestWithin(r.Outcome, limit)
 	sb.WriteString("\nTrials\n")
-	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  phase\tR\tV\tvarbinds/s\tp50 ms\tp99 ms\tmax B\tresult")
+	const rowFmt = "  %-8s  %4s  %3s  %11s  %7s  %7s  %6s  %s"
+	fmt.Fprintf(&sb, rowFmt+"\n", "phase", "R", "V", "varbinds/s", "p50 ms", "p99 ms", "max B", "result")
 	for i := range r.Outcome.Trials {
 		t := &r.Outcome.Trials[i]
 		mb := maxBytes(*t)
+		fragmented := mb > limit
 		var line string
-		switch {
-		case !t.OK():
-			line = fmt.Sprintf("  %s\t%d\t%d\t-\t-\t-\t%d\tFAILED: %s", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU, mb, t.Failure)
-		default:
+		if t.OK() {
 			d, _ := rtts(*t)
 			mark := "ok"
-			if t == best {
+			switch {
+			case fragmented:
+				mark = "ok, FRAGMENTED"
+			case t == best:
 				mark = "ok, BEST"
 			}
-			line = fmt.Sprintf("  %s\t%d\t%d\t%.0f\t%.1f\t%.1f\t%d\t%s", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU,
-				t.Score, ms(percentile(d, 50)), ms(percentile(d, 99)), mb, mark)
+			line = fmt.Sprintf(rowFmt, t.Phase, fmt.Sprint(t.Settings.MaxRepetitions), fmt.Sprint(t.Settings.MaxVarsPerPDU),
+				fmt.Sprintf("%.0f", t.Score), fmt.Sprintf("%.1f", ms(percentile(d, 50))), fmt.Sprintf("%.1f", ms(percentile(d, 99))),
+				fmt.Sprint(mb), mark)
+		} else {
+			mark := "FAILED: " + t.Failure
+			if fragmented {
+				mark = "FAILED, FRAGMENTED: " + t.Failure
+			}
+			line = fmt.Sprintf(rowFmt, t.Phase, fmt.Sprint(t.Settings.MaxRepetitions), fmt.Sprint(t.Settings.MaxVarsPerPDU),
+				"-", "-", "-", fmt.Sprint(mb), mark)
 		}
-		if mb > limit {
-			line = r.paint(red, line+", FRAGMENTED")
-		} else if t.OK() && t == best {
+		// Colour wraps the finished line so it never disturbs the columns.
+		switch {
+		case fragmented:
+			line = r.paint(red, line)
+		case t.OK() && t == best:
 			line = r.paint(green, line)
 		}
-		fmt.Fprintln(tw, line)
+		sb.WriteString(line + "\n")
 	}
-	_ = tw.Flush()
-	fmt.Fprintf(&sb, "  One datagram holds up to %d B at MTU %d. FRAGMENTED: a response exceeded that and was IP-fragmented. BEST: highest throughput within one datagram.\n", limit, r.MTU)
+	fmt.Fprintf(&sb, "\n  Datagram limit %d B at MTU %d. FRAGMENTED = response above the limit, IP-fragmented on the wire.\n", limit, r.MTU)
+	sb.WriteString("  BEST = highest throughput within one datagram.\n")
+	var notes []string
 	if r.Outcome.Note != "" {
-		fmt.Fprintf(&sb, "\n%s\n", r.Outcome.Note)
+		notes = append(notes, r.Outcome.Note)
 	}
-	switch {
-	case r.Outcome.Stressed && allRequested(r.Outcome):
-		sb.WriteString("\nCanary showed agent stress between repeats; requested settings were still measured.\n")
-	case r.Outcome.Stressed:
-		sb.WriteString("\nCanary showed agent stress; escalation was stopped early.\n")
+	if r.Outcome.Stressed && !strings.Contains(r.Outcome.Note, "stress") {
+		if allRequested(r.Outcome) {
+			notes = append(notes, "canary showed agent stress between repeats; requested settings were still measured")
+		} else {
+			notes = append(notes, "canary showed agent stress; escalation was stopped early")
+		}
+	}
+	if len(notes) > 0 {
+		sb.WriteString("\nNotes\n")
+		for _, n := range notes {
+			fmt.Fprintf(&sb, "  %s\n", n)
+		}
 	}
 	sb.WriteString("\nRecommendation\n")
 	if r.Recommendation == nil {

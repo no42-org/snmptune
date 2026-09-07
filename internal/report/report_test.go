@@ -7,6 +7,7 @@ package report
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -274,5 +275,45 @@ func TestJSONCarriesBytesAndFragmentation(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("json missing %s:\n%s", want, s)
 		}
+	}
+}
+
+func TestColourDoesNotChangeAlignment(t *testing.T) {
+	r := fragReport()
+	plain := r.Text()
+	r.Color = true
+	stripped := regexp.MustCompile("\x1b\\[[0-9;]*m").ReplaceAllString(r.Text(), "")
+	if stripped != plain {
+		t.Fatalf("colour must only wrap lines:\n--- plain\n%s\n--- stripped\n%s", plain, stripped)
+	}
+}
+
+func TestNumericColumnsAreRightAligned(t *testing.T) {
+	text := fullReport().Text()
+	var rows []string
+	for _, l := range strings.Split(text, "\n") {
+		if strings.HasPrefix(l, "  escalate") {
+			rows = append(rows, l)
+		}
+	}
+	if len(rows) < 3 {
+		t.Fatalf("rows missing:\n%s", text)
+	}
+	// The result column starts at the same offset in every row, and the
+	// numbers end at the same offset as the header labels.
+	off := strings.Index(rows[0], "ok")
+	for _, row := range rows[1:] {
+		if i := strings.Index(row, "ok"); i != off && strings.Index(row, "FAILED") != off {
+			t.Fatalf("result column drifts:\n%s", text)
+		}
+	}
+}
+
+func TestStressNoteNotDuplicated(t *testing.T) {
+	r := fullReport()
+	r.Outcome.Stressed = true
+	r.Outcome.Note = "escalation stopped: R=8 V=10 was not tried because of agent stress"
+	if n := strings.Count(strings.ToLower(r.Text()), "stress"); n != 1 {
+		t.Fatalf("stress should be mentioned once, got %d:\n%s", n, r.Text())
 	}
 }
