@@ -88,7 +88,8 @@ In try mode the recommendation is the best of the requested settings, without th
 An SNMP response is one UDP datagram.
 Above the path MTU minus 28 bytes of headers, 1472 bytes on Ethernet, it is sent as IP fragments, and losing one fragment loses the whole response.
 That works on a clean LAN and fails unpredictably across firewalls, VPNs and policers, which is where the OpenNMS poller usually sits.
-The trial table shows the largest response per setting.
+The trial table shows the largest response per setting and how much of one datagram it fills.
+A fragmented setting also shows how many IP fragments it needs and by how many bytes it exceeds the limit.
 Settings above the limit are marked FRAGMENTED and shown in red on a terminal.
 The setting with the highest throughput within one datagram is marked BEST and shown in green.
 The recommendation only considers settings within one datagram unless nothing else passed.

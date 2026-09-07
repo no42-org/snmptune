@@ -38,6 +38,22 @@ const (
 // DatagramLimit is the largest SNMP message that fits one datagram at mtu.
 func DatagramLimit(mtu int) int { return mtu - udpOverhead }
 
+// Fragments is the number of IP fragments a UDP payload of the given size
+// needs at mtu: the payload plus the 8-byte UDP header, split into pieces
+// of at most mtu minus the 20-byte IP header.
+func Fragments(payload, mtu int) int {
+	per := mtu - 20
+	return (payload + 8 + per - 1) / per
+}
+
+// fillPct is the payload as a percentage of the datagram limit.
+func fillPct(payload, limit int) int { return (payload*100 + limit/2) / limit }
+
+// fragmentDetail describes an oversized response.
+func fragmentDetail(payload, mtu int) string {
+	return fmt.Sprintf("%d fragments, %d B over", Fragments(payload, mtu), payload-DatagramLimit(mtu))
+}
+
 // Recommendation is what goes into snmp-config.xml, with the evidence.
 type Recommendation struct {
 	Settings   walk.Settings `json:"settings"`
@@ -50,6 +66,8 @@ type Recommendation struct {
 	TimeoutMs  int           `json:"timeout_ms"`
 	Retry      int           `json:"retry"`
 	MaxBytes   int           `json:"max_bytes"`
+	FillPct    int           `json:"datagram_fill_pct"`
+	Fragments  int           `json:"fragments"`
 	Fragmented bool          `json:"fragmented"`
 }
 
@@ -241,32 +259,33 @@ func (r Report) Text() string {
 	limit := DatagramLimit(r.MTU)
 	best := bestWithin(r.Outcome, limit)
 	sb.WriteString("\nTrials\n")
-	const rowFmt = "  %-8s  %4s  %3s  %11s  %7s  %7s  %6s  %s"
-	fmt.Fprintf(&sb, rowFmt+"\n", "phase", "R", "V", "varbinds/s", "p50 ms", "p99 ms", "max B", "result")
+	const rowFmt = "  %-8s  %4s  %3s  %11s  %7s  %7s  %6s  %5s  %s"
+	fmt.Fprintf(&sb, rowFmt+"\n", "phase", "R", "V", "varbinds/s", "p50 ms", "p99 ms", "max B", "fill", "result")
 	for i := range r.Outcome.Trials {
 		t := &r.Outcome.Trials[i]
 		mb := maxBytes(*t)
 		fragmented := mb > limit
+		fill := fmt.Sprintf("%d%%", fillPct(mb, limit))
 		var line string
 		if t.OK() {
 			d, _ := rtts(*t)
 			mark := "ok"
 			switch {
 			case fragmented:
-				mark = "ok, FRAGMENTED"
+				mark = "ok, FRAGMENTED (" + fragmentDetail(mb, r.MTU) + ")"
 			case t == best:
 				mark = "ok, BEST"
 			}
 			line = fmt.Sprintf(rowFmt, t.Phase, fmt.Sprint(t.Settings.MaxRepetitions), fmt.Sprint(t.Settings.MaxVarsPerPDU),
 				fmt.Sprintf("%.0f", t.Score), fmt.Sprintf("%.1f", ms(percentile(d, 50))), fmt.Sprintf("%.1f", ms(percentile(d, 99))),
-				fmt.Sprint(mb), mark)
+				fmt.Sprint(mb), fill, mark)
 		} else {
 			mark := "FAILED: " + t.Failure
 			if fragmented {
-				mark = "FAILED, FRAGMENTED: " + t.Failure
+				mark = "FAILED, FRAGMENTED (" + fragmentDetail(mb, r.MTU) + "): " + t.Failure
 			}
 			line = fmt.Sprintf(rowFmt, t.Phase, fmt.Sprint(t.Settings.MaxRepetitions), fmt.Sprint(t.Settings.MaxVarsPerPDU),
-				"-", "-", "-", fmt.Sprint(mb), mark)
+				"-", "-", "-", fmt.Sprint(mb), fill, mark)
 		}
 		// Colour wraps the finished line so it never disturbs the columns.
 		switch {
@@ -277,8 +296,8 @@ func (r Report) Text() string {
 		}
 		sb.WriteString(line + "\n")
 	}
-	fmt.Fprintf(&sb, "\n  Datagram limit %d B at MTU %d. FRAGMENTED = response above the limit, IP-fragmented on the wire.\n", limit, r.MTU)
-	sb.WriteString("  BEST = highest throughput within one datagram.\n")
+	fmt.Fprintf(&sb, "\n  Datagram limit %d B at MTU %d; fill = largest response as a share of it.\n", limit, r.MTU)
+	sb.WriteString("  FRAGMENTED = above the limit, IP-fragmented on the wire. BEST = highest throughput within one datagram.\n")
 	var notes []string
 	if r.Outcome.Note != "" {
 		notes = append(notes, r.Outcome.Note)
@@ -304,7 +323,11 @@ func (r Report) Text() string {
 	rec := r.Recommendation
 	fmt.Fprintf(&sb, "  max-repetitions  %d\n  max-vars-per-pdu %d\n  timeout          %d ms  (3 x p99 %.1f ms, rounded up, floor 500 ms)\n  retry            %d\n",
 		rec.Settings.MaxRepetitions, rec.Settings.MaxVarsPerPDU, rec.TimeoutMs, rec.P99ms, rec.Retry)
-	fmt.Fprintf(&sb, "  largest response %d B\n  observed peak    %s\n  why              %s\n", rec.MaxBytes, rec.Peak, rec.Reason)
+	size := fmt.Sprintf("%d B (%d%% of a %d B datagram)", rec.MaxBytes, fillPct(rec.MaxBytes, limit), limit)
+	if rec.MaxBytes > limit {
+		size = fmt.Sprintf("%d B (%d%% of a %d B datagram, %s)", rec.MaxBytes, fillPct(rec.MaxBytes, limit), limit, fragmentDetail(rec.MaxBytes, r.MTU))
+	}
+	fmt.Fprintf(&sb, "  largest response %s\n  observed peak    %s\n  why              %s\n", size, rec.Peak, rec.Reason)
 	return sb.String()
 }
 
@@ -370,7 +393,8 @@ func (r Report) JSON() ([]byte, error) {
 		mb := maxBytes(*t)
 		v.Trials = append(v.Trials, trialView{Phase: t.Phase, R: t.Settings.MaxRepetitions, V: t.Settings.MaxVarsPerPDU,
 			Score: t.Score, P50ms: ms(percentile(d, 50)), P99ms: ms(percentile(d, 99)), Repeats: len(t.Runs), Failure: t.Failure,
-			MaxBytes: mb, Fragmented: mb > DatagramLimit(r.MTU), BestUnfragmented: t == best})
+			MaxBytes: mb, FillPct: fillPct(mb, DatagramLimit(r.MTU)), Fragments: Fragments(mb, r.MTU),
+			Fragmented: mb > DatagramLimit(r.MTU), BestUnfragmented: t == best})
 	}
 	return json.MarshalIndent(v, "", "  ")
 }
