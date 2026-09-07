@@ -21,6 +21,7 @@ import (
 
 	"github.com/no42-org/snmptune/internal/agent"
 	"github.com/no42-org/snmptune/internal/inventory"
+	"github.com/no42-org/snmptune/internal/oid"
 	"github.com/no42-org/snmptune/internal/report"
 	"github.com/no42-org/snmptune/internal/safety"
 	"github.com/no42-org/snmptune/internal/search"
@@ -123,6 +124,10 @@ func run(ctx context.Context, args []string, out, errw io.Writer, dial dialFunc)
 
 	// Workload before any packet: the plan needs it and errors here are usage errors.
 	var w workload.Workload
+	for i, r := range o.oids {
+		o.oids[i] = oid.Canonical(r) // accept the net-snmp spelling with a leading dot
+	}
+	o.referenceTree = oid.Canonical(o.referenceTree)
 	roots := slices.Clone([]string(o.oids))
 	if o.group != "" {
 		file, name := workload.SplitGroupArg(o.group)

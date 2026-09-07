@@ -199,3 +199,13 @@ func TestSkippedColumnWarnsOnStderr(t *testing.T) {
 		t.Fatalf("want exit 0 and a warning naming the column, got %d\n%s", code, errw.String())
 	}
 }
+
+func TestLeadingDotOIDsAreAccepted(t *testing.T) {
+	a := sim.New()
+	a.AddTable("1.3.6.1.2.1.2.2", 2, 5)
+	var out, errw bytes.Buffer
+	code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", ".1.3.6.1.2.1.2.2", "--repeats", "1", "--cooldown", "0"}, &out, &errw, simDial(a))
+	if code != 0 || !strings.Contains(out.String(), "max-repetitions") {
+		t.Fatalf("a leading dot is the net-snmp spelling and must work: exit %d\n%s", code, errw.String())
+	}
+}
