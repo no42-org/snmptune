@@ -233,3 +233,22 @@ func TestTryFlagMeasuresGivenSettings(t *testing.T) {
 		t.Fatalf("malformed --try is a usage error, got %d", code)
 	}
 }
+
+func TestColorFlagAndMTU(t *testing.T) {
+	a := sim.New()
+	a.AddTable("1.3.6.1.2.1.31.1.1", 19, 8)
+	a.RTT = func(n int) time.Duration { return time.Millisecond }
+	var out, errw bytes.Buffer
+	code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.31.1.1", "--try", "8:19", "--try", "2:19", "--repeats", "1", "--cooldown", "0", "--color", "always"}, &out, &errw, simDial(a))
+	if code != 0 || !strings.Contains(out.String(), "\x1b[31m") || !strings.Contains(out.String(), "\x1b[32m") {
+		t.Fatalf("want coloured output, exit %d\n%s%s", code, out.String(), errw.String())
+	}
+	out.Reset()
+	code = run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.31.1.1", "--try", "8:19", "--repeats", "1", "--cooldown", "0", "--mtu", "9000"}, &out, &errw, simDial(a))
+	if code != 0 || strings.Contains(out.String(), ", FRAGMENTED") || strings.Contains(out.String(), "\x1b[") {
+		t.Fatalf("jumbo MTU: nothing fragmented and no colour on a buffer, exit %d\n%s", code, out.String())
+	}
+	if code := run(context.Background(), []string{"--target", "192.0.2.1", "--oid", "1.3.6.1.2.1.1", "--color", "sometimes"}, &out, &errw, nil); code != 2 {
+		t.Fatalf("bad --color is a usage error, got %d", code)
+	}
+}

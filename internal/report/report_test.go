@@ -195,3 +195,84 @@ func TestSearchNoteInText(t *testing.T) {
 		t.Fatalf("note missing:\n%s", r.Text())
 	}
 }
+
+func fragReport() Report {
+	big := trial(4, 19, 3649, "", 20*time.Millisecond)
+	big.Runs[0].PDUs[0].Bytes = 1674
+	mid := trial(2, 20, 3061, "", 12*time.Millisecond)
+	mid.Runs[0].PDUs[0].Bytes = 858
+	small := trial(4, 10, 1575, "", 14*time.Millisecond)
+	small.Runs[0].PDUs[0].Bytes = 936
+	big.Phase, mid.Phase, small.Phase = "try", "try", "try"
+	o := search.Outcome{Trials: []search.Trial{small, mid, big}}
+	return Build("192.0.2.1", inventory.Inventory{}, o)
+}
+
+func TestRecommendationAvoidsFragmentedSettings(t *testing.T) {
+	r := fragReport()
+	if r.Recommendation == nil || r.Recommendation.Settings != (walk.Settings{MaxRepetitions: 2, MaxVarsPerPDU: 20}) {
+		t.Fatalf("best setting within one datagram is R2 V20, got %+v", r.Recommendation)
+	}
+	if !strings.Contains(r.Recommendation.Reason, "datagram") {
+		t.Fatalf("reason must mention the datagram limit: %s", r.Recommendation.Reason)
+	}
+}
+
+func TestFragmentedTrialsAreMarkedAndColoured(t *testing.T) {
+	r := fragReport()
+	plain := r.Text()
+	if strings.Contains(plain, "\x1b[") {
+		t.Fatal("no escape codes without colour")
+	}
+	if !strings.Contains(plain, "max B") || !strings.Contains(plain, ", FRAGMENTED") || !strings.Contains(plain, "ok, BEST") {
+		t.Fatalf("plain text must carry the marks:\n%s", plain)
+	}
+	r.Color = true
+	col := r.Text()
+	var red, green string
+	var plainRow string
+	for _, l := range strings.Split(col, "\n") {
+		switch {
+		case strings.Contains(l, "1674"):
+			red = l
+		case strings.Contains(l, "858") && strings.Contains(l, "try"):
+			green = l
+		case strings.Contains(l, "936"):
+			plainRow = l
+		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(red), "\x1b[31m") || !strings.HasPrefix(strings.TrimSpace(green), "\x1b[32m") {
+		t.Fatalf("want red fragmented row and green best row:\nred=%q\ngreen=%q", red, green)
+	}
+	if strings.Contains(plainRow, "\x1b[") {
+		t.Fatalf("the plain ok row must not be coloured: %q", plainRow)
+	}
+}
+
+func TestMTUChangesTheThreshold(t *testing.T) {
+	r := fragReport()
+	r.MTU = 9000
+	if r.Recommendation == nil {
+		t.Fatal("no recommendation")
+	}
+	r = Build("192.0.2.1", inventory.Inventory{}, r.Outcome, WithMTU(9000))
+	if r.Recommendation.Settings != (walk.Settings{MaxRepetitions: 4, MaxVarsPerPDU: 19}) {
+		t.Fatalf("with jumbo frames nothing fragments and R4 V19 wins, got %+v", r.Recommendation)
+	}
+	if strings.Contains(r.Text(), ", FRAGMENTED") {
+		t.Fatal("nothing is fragmented at MTU 9000")
+	}
+}
+
+func TestJSONCarriesBytesAndFragmentation(t *testing.T) {
+	raw, err := fragReport().JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	for _, want := range []string{`"max_bytes": 1674`, `"fragmented": true`, `"best_unfragmented": true`, `"datagram_limit": 1472`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("json missing %s:\n%s", want, s)
+		}
+	}
+}

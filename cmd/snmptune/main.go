@@ -29,6 +29,16 @@ import (
 	"github.com/no42-org/snmptune/internal/workload"
 )
 
+// isTerminal reports whether w is a character device such as a terminal.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 // Exit codes.
 const (
 	exitOK      = 0
@@ -52,14 +62,14 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 type options struct {
-	target, community, group, referenceTree, format, pduLog string
-	port, retries                                           int
-	timeout                                                 time.Duration
-	oids, tries                                             multiFlag
-	settings                                                []walk.Settings
-	budget                                                  safety.Budget
-	search                                                  search.Options
-	dryRun, jsonOut                                         bool
+	target, community, group, referenceTree, format, pduLog, color string
+	port, retries, mtu                                             int
+	timeout                                                        time.Duration
+	oids, tries                                                    multiFlag
+	settings                                                       []walk.Settings
+	budget                                                         safety.Budget
+	search                                                         search.Options
+	dryRun, jsonOut                                                bool
 }
 
 func parse(args []string, errw io.Writer) (options, error) {
@@ -87,6 +97,8 @@ func parse(args []string, errw io.Writer) (options, error) {
 	fs.BoolVar(&o.jsonOut, "json", false, "print the report as JSON")
 	fs.StringVar(&o.format, "format", "text", "text or opennms (snmp-config.xml definition)")
 	fs.StringVar(&o.pduLog, "pdu-log", "", "append per-PDU telemetry as JSON lines to this file")
+	fs.IntVar(&o.mtu, "mtu", report.DefaultMTU, "path MTU; responses above MTU-28 bytes are marked as IP-fragmented")
+	fs.StringVar(&o.color, "color", "auto", "colour the text report: auto, always or never")
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
@@ -101,6 +113,12 @@ func parse(args []string, errw io.Writer) (options, error) {
 	}
 	if o.search.Repeats < 1 {
 		return o, errors.New("--repeats must be at least 1")
+	}
+	if o.color != "auto" && o.color != "always" && o.color != "never" {
+		return o, fmt.Errorf("--color %q: want auto, always or never", o.color)
+	}
+	if o.mtu < 576 {
+		return o, fmt.Errorf("--mtu %d is below the IPv4 minimum of 576", o.mtu)
 	}
 	if o.port < 1 || o.port > 65535 {
 		return o, fmt.Errorf("--port %d is out of range 1-65535", o.port)
@@ -255,7 +273,8 @@ func run(ctx context.Context, args []string, out, errw io.Writer, dial dialFunc)
 	} else {
 		outcome = runner.Run(ctx)
 	}
-	rep := report.Build(o.target, shown, outcome)
+	rep := report.Build(o.target, shown, outcome, report.WithMTU(o.mtu))
+	rep.Color = o.color == "always" || o.color == "auto" && isTerminal(out)
 
 	switch {
 	case o.jsonOut:

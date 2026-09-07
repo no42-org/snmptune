@@ -25,39 +25,87 @@ const (
 	timeoutFactor  = 3
 	timeoutRoundMs = 100
 	timeoutFloorMs = 500
+
+	// DefaultMTU is the Ethernet MTU; a UDP payload above MTU minus the IP
+	// and UDP headers is sent as IP fragments.
+	DefaultMTU  = 1500
+	udpOverhead = 28
+
+	red   = "\x1b[31m"
+	green = "\x1b[32m"
+	reset = "\x1b[0m"
 )
+
+// DatagramLimit is the largest SNMP message that fits one datagram at mtu.
+func DatagramLimit(mtu int) int { return mtu - udpOverhead }
 
 // Recommendation is what goes into snmp-config.xml, with the evidence.
 type Recommendation struct {
-	Settings  walk.Settings `json:"settings"`
-	Peak      walk.Settings `json:"peak"`
-	Reason    string        `json:"reason"`
-	P50       time.Duration `json:"-"`
-	P99       time.Duration `json:"-"`
-	P50ms     float64       `json:"p50_ms"`
-	P99ms     float64       `json:"p99_ms"`
-	TimeoutMs int           `json:"timeout_ms"`
-	Retry     int           `json:"retry"`
+	Settings   walk.Settings `json:"settings"`
+	Peak       walk.Settings `json:"peak"`
+	Reason     string        `json:"reason"`
+	P50        time.Duration `json:"-"`
+	P99        time.Duration `json:"-"`
+	P50ms      float64       `json:"p50_ms"`
+	P99ms      float64       `json:"p99_ms"`
+	TimeoutMs  int           `json:"timeout_ms"`
+	Retry      int           `json:"retry"`
+	MaxBytes   int           `json:"max_bytes"`
+	Fragmented bool          `json:"fragmented"`
 }
 
-// Recommend picks the largest error-free product strictly below the peak,
-// or the default when the peak is the default. ok is false when no trial
-// passed at all.
-func Recommend(o search.Outcome) (rec Recommendation, ok bool) {
-	peak := o.Peak()
+// Recommend is recommend at the default MTU.
+func Recommend(o search.Outcome) (Recommendation, bool) {
+	return recommend(o, DatagramLimit(DefaultMTU))
+}
+
+// maxBytes is the largest response seen in a trial.
+func maxBytes(t search.Trial) int {
+	n := 0
+	for _, run := range t.Runs {
+		for _, p := range run.PDUs {
+			n = max(n, p.Bytes)
+		}
+	}
+	return n
+}
+
+// bestWithin is the clean trial with the best throughput whose responses
+// all fit one datagram, or nil.
+func bestWithin(o search.Outcome, limit int) *search.Trial {
+	var best *search.Trial
+	for i := range o.Trials {
+		t := &o.Trials[i]
+		if t.OK() && maxBytes(*t) <= limit && (best == nil || t.Score > best.Score) {
+			best = t
+		}
+	}
+	return best
+}
+
+// recommend picks the largest error-free product strictly below the peak,
+// or the default when the peak is the default. Settings whose responses
+// exceed one datagram are only considered when nothing else passed. ok is
+// false when no trial passed at all.
+func recommend(o search.Outcome, limit int) (rec Recommendation, ok bool) {
+	peak := bestWithin(o, limit)
+	if peak == nil {
+		peak = o.Peak()
+		rec.Fragmented = true
+	}
 	if peak == nil {
 		return rec, false
 	}
 	chosen := peak
 	if allRequested(o) {
-		rec.Reason = fmt.Sprintf("best of the requested settings (%.0f varbinds/s); no headroom step in try mode", peak.Score)
+		rec.Reason = fmt.Sprintf("best of the requested settings within one datagram of %d B (%.0f varbinds/s); no headroom step in try mode", limit, peak.Score)
 	} else if peak.Settings == search.Start {
 		rec.Reason = "the agent did not sustain more than the OpenNMS default without errors"
 	} else {
 		var below *search.Trial
 		for i := range o.Trials {
 			t := &o.Trials[i]
-			if !t.OK() || t.Settings.Product() >= peak.Settings.Product() {
+			if !t.OK() || t.Settings.Product() >= peak.Settings.Product() || maxBytes(*t) > limit {
 				continue
 			}
 			if below == nil || t.Settings.Product() > below.Settings.Product() ||
@@ -72,7 +120,10 @@ func Recommend(o search.Outcome) (rec Recommendation, ok bool) {
 			rec.Reason = "no error-free setting below the peak was measured"
 		}
 	}
-	rec.Settings, rec.Peak = chosen.Settings, peak.Settings
+	if rec.Fragmented {
+		rec.Reason = fmt.Sprintf("every clean setting exceeds one datagram of %d B; %s. Expect IP fragmentation on this path", limit, rec.Reason)
+	}
+	rec.Settings, rec.Peak, rec.MaxBytes = chosen.Settings, peak.Settings, maxBytes(*chosen)
 	rtts, retried := rtts(*chosen)
 	rec.P50, rec.P99 = percentile(rtts, 50), percentile(rtts, 99)
 	rec.P50ms, rec.P99ms = ms(rec.P50), ms(rec.P99)
@@ -134,15 +185,33 @@ type Report struct {
 	Reference      inventory.Inventory
 	Outcome        search.Outcome
 	Recommendation *Recommendation
+	MTU            int  // path MTU the datagram limit derives from
+	Color          bool // ANSI colours in Text
 }
 
+// Option adjusts Build.
+type Option func(*Report)
+
+// WithMTU sets the path MTU used for the datagram limit.
+func WithMTU(mtu int) Option { return func(r *Report) { r.MTU = mtu } }
+
 // Build assembles the report for one run.
-func Build(target string, inv inventory.Inventory, o search.Outcome) Report {
-	r := Report{Target: target, Reference: inv, Outcome: o}
-	if rec, ok := Recommend(o); ok {
+func Build(target string, inv inventory.Inventory, o search.Outcome, opts ...Option) Report {
+	r := Report{Target: target, Reference: inv, Outcome: o, MTU: DefaultMTU}
+	for _, opt := range opts {
+		opt(&r)
+	}
+	if rec, ok := recommend(o, DatagramLimit(r.MTU)); ok {
 		r.Recommendation = &rec
 	}
 	return r
+}
+
+func (r Report) paint(color, s string) string {
+	if !r.Color {
+		return s
+	}
+	return color + s + reset
 }
 
 // Text renders the human-readable report.
@@ -170,19 +239,36 @@ func (r Report) Text() string {
 			fmt.Fprintf(&sb, "    warning: agent misordered %s, rest of it skipped\n", sk)
 		}
 	}
+	limit := DatagramLimit(r.MTU)
+	best := bestWithin(r.Outcome, limit)
 	sb.WriteString("\nTrials\n")
 	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  phase\tR\tV\tvarbinds/s\tp50 ms\tp99 ms\tresult")
-	for _, t := range r.Outcome.Trials {
-		if !t.OK() {
-			fmt.Fprintf(tw, "  %s\t%d\t%d\t-\t-\t-\tFAILED: %s\n", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU, t.Failure)
-			continue
+	fmt.Fprintln(tw, "  phase\tR\tV\tvarbinds/s\tp50 ms\tp99 ms\tmax B\tresult")
+	for i := range r.Outcome.Trials {
+		t := &r.Outcome.Trials[i]
+		mb := maxBytes(*t)
+		var line string
+		switch {
+		case !t.OK():
+			line = fmt.Sprintf("  %s\t%d\t%d\t-\t-\t-\t%d\tFAILED: %s", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU, mb, t.Failure)
+		default:
+			d, _ := rtts(*t)
+			mark := "ok"
+			if t == best {
+				mark = "ok, BEST"
+			}
+			line = fmt.Sprintf("  %s\t%d\t%d\t%.0f\t%.1f\t%.1f\t%d\t%s", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU,
+				t.Score, ms(percentile(d, 50)), ms(percentile(d, 99)), mb, mark)
 		}
-		d, _ := rtts(t)
-		fmt.Fprintf(tw, "  %s\t%d\t%d\t%.0f\t%.1f\t%.1f\tok\n", t.Phase, t.Settings.MaxRepetitions, t.Settings.MaxVarsPerPDU,
-			t.Score, ms(percentile(d, 50)), ms(percentile(d, 99)))
+		if mb > limit {
+			line = r.paint(red, line+", FRAGMENTED")
+		} else if t.OK() && t == best {
+			line = r.paint(green, line)
+		}
+		fmt.Fprintln(tw, line)
 	}
 	_ = tw.Flush()
+	fmt.Fprintf(&sb, "  One datagram holds up to %d B at MTU %d. FRAGMENTED: a response exceeded that and was IP-fragmented. BEST: highest throughput within one datagram.\n", limit, r.MTU)
 	if r.Outcome.Note != "" {
 		fmt.Fprintf(&sb, "\n%s\n", r.Outcome.Note)
 	}
@@ -200,7 +286,7 @@ func (r Report) Text() string {
 	rec := r.Recommendation
 	fmt.Fprintf(&sb, "  max-repetitions  %d\n  max-vars-per-pdu %d\n  timeout          %d ms  (3 x p99 %.1f ms, rounded up, floor 500 ms)\n  retry            %d\n",
 		rec.Settings.MaxRepetitions, rec.Settings.MaxVarsPerPDU, rec.TimeoutMs, rec.P99ms, rec.Retry)
-	fmt.Fprintf(&sb, "  observed peak    %s\n  why              %s\n", rec.Peak, rec.Reason)
+	fmt.Fprintf(&sb, "  largest response %d B\n  observed peak    %s\n  why              %s\n", rec.MaxBytes, rec.Peak, rec.Reason)
 	return sb.String()
 }
 
@@ -215,14 +301,17 @@ func (r Report) OpenNMS() string {
 }
 
 type trialView struct {
-	Phase   string  `json:"phase"`
-	R       uint32  `json:"max_repetitions"`
-	V       int     `json:"max_vars_per_pdu"`
-	Score   float64 `json:"varbinds_per_second"`
-	P50ms   float64 `json:"p50_ms"`
-	P99ms   float64 `json:"p99_ms"`
-	Repeats int     `json:"repeats"`
-	Failure string  `json:"failure,omitempty"`
+	Phase            string  `json:"phase"`
+	R                uint32  `json:"max_repetitions"`
+	V                int     `json:"max_vars_per_pdu"`
+	Score            float64 `json:"varbinds_per_second"`
+	P50ms            float64 `json:"p50_ms"`
+	P99ms            float64 `json:"p99_ms"`
+	Repeats          int     `json:"repeats"`
+	Failure          string  `json:"failure,omitempty"`
+	MaxBytes         int     `json:"max_bytes"`
+	Fragmented       bool    `json:"fragmented"`
+	BestUnfragmented bool    `json:"best_unfragmented"`
 }
 
 type subtreeView struct {
@@ -245,20 +334,25 @@ type view struct {
 	BudgetLimited  string          `json:"budget_limited"`
 	Stressed       bool            `json:"stressed"`
 	Note           string          `json:"note"`
+	DatagramLimit  int             `json:"datagram_limit"`
 }
 
 // JSON renders the report as one JSON document without per-PDU detail.
 func (r Report) JSON() ([]byte, error) {
 	v := view{Target: r.Target, ReferencePDUs: r.Reference.PDUs, Recommendation: r.Recommendation,
 		Aborted: r.Outcome.Aborted, BudgetLimited: r.Outcome.BudgetLimited, Stressed: r.Outcome.Stressed, Note: r.Outcome.Note,
-		Reference: []subtreeView{}, Trials: []trialView{}}
+		Reference: []subtreeView{}, Trials: []trialView{}, DatagramLimit: DatagramLimit(r.MTU)}
+	best := bestWithin(r.Outcome, DatagramLimit(r.MTU))
 	for _, st := range r.Reference.Subtrees {
 		v.Reference = append(v.Reference, subtreeView{Root: st.Root, OIDs: st.Count(), Bytes: st.Bytes, PerVB: st.MeanBytesPerVarbind(), Columns: len(st.Columns), Partial: st.Partial, Skipped: append([]string{}, st.Skipped...)})
 	}
-	for _, t := range r.Outcome.Trials {
-		d, _ := rtts(t)
+	for i := range r.Outcome.Trials {
+		t := &r.Outcome.Trials[i]
+		d, _ := rtts(*t)
+		mb := maxBytes(*t)
 		v.Trials = append(v.Trials, trialView{Phase: t.Phase, R: t.Settings.MaxRepetitions, V: t.Settings.MaxVarsPerPDU,
-			Score: t.Score, P50ms: ms(percentile(d, 50)), P99ms: ms(percentile(d, 99)), Repeats: len(t.Runs), Failure: t.Failure})
+			Score: t.Score, P50ms: ms(percentile(d, 50)), P99ms: ms(percentile(d, 99)), Repeats: len(t.Runs), Failure: t.Failure,
+			MaxBytes: mb, Fragmented: mb > DatagramLimit(r.MTU), BestUnfragmented: t == best})
 	}
 	return json.MarshalIndent(v, "", "  ")
 }

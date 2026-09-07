@@ -83,6 +83,17 @@ snmptune --target 192.0.2.1 --oid 1.3.6.1.2.1.31.1.1 --try 4:10 --try 2:20
 
 In try mode the recommendation is the best of the requested settings, without the headroom step.
 
+## Fragmentation
+
+An SNMP response is one UDP datagram.
+Above the path MTU minus 28 bytes of headers, 1472 bytes on Ethernet, it is sent as IP fragments, and losing one fragment loses the whole response.
+That works on a clean LAN and fails unpredictably across firewalls, VPNs and policers, which is where the OpenNMS poller usually sits.
+The trial table shows the largest response per setting.
+Settings above the limit are marked FRAGMENTED and shown in red on a terminal.
+The setting with the highest throughput within one datagram is marked BEST and shown in green.
+The recommendation only considers settings within one datagram unless nothing else passed.
+`--mtu` sets the path MTU, for example 9000 on a jumbo-frame network, and `--color` forces colour on or off.
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--target`, `--port`, `--community` | 161, public | the agent |
@@ -91,6 +102,8 @@ In try mode the recommendation is the best of the requested settings, without th
 | `--group` | | datacollection XML file, optionally `:group` |
 | `--reference-tree` | | extra subtree for the inventory report only |
 | `--try` | | measure this `R:V` instead of searching, repeatable |
+| `--mtu` | 1500 | path MTU for the fragmentation mark |
+| `--color` | auto | `auto`, `always` or `never` |
 | `--repeats` | 3 | repeats per trial |
 | `--cooldown` | 2s | minimum pause between runs |
 | `--tolerance` | 1 | percent of reference OIDs a trial may miss |
